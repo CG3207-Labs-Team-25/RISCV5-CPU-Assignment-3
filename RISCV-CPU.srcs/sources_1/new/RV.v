@@ -69,7 +69,7 @@ module RV #(
     wire [4:0] rs1 ;
     wire [4:0] rs2 ;
     wire [4:0] rd ;
-    wire [31:0] WD ;
+    reg [31:0] WD ;
     wire [31:0] R15 ;
     wire [31:0] RD1 ;
     wire [31:0] RD2 ;
@@ -86,11 +86,12 @@ module RV #(
     wire [1:0] PCS ;
     wire RegWrite ;
     //wire MemWrite ;
-    wire MemtoReg ;
+    wire [1:0] MemtoReg ;
     wire [1:0] ALUSrcA ;
     wire [1:0] ALUSrcB ;
     //wire [2:0] ImmSrc ;
     wire [3:0] ALUControl ;
+    wire [1:0] MCycleOp ;
 
     // PC_Logic signals
     //wire [1:0] PCS
@@ -105,6 +106,14 @@ module RV #(
     //wire [31:0] ALUResult ;
     wire [2:0] ALUFlags ;
     
+    // MCycle signal
+    wire Start ;
+    //wire [1:0] MCycleOp ;
+    wire [31:0] Operand1 ;
+    wire [31:0] Operand2 ;
+    wire [31:0] Result1 ;
+    wire [31:0] Result2 ;
+    wire Busy;
     // ProgramCounter signals
     //wire CLK ;
     //wire RESET ;
@@ -131,7 +140,15 @@ module RV #(
     assign rs1 = Instr[19:15];
     assign rs2 = Instr[24:20];
     assign rd = Instr[11:7];
-    assign WD = (MemtoReg == 0) ? ALUResult : ReadData;
+    always @(*) begin
+        case(MemtoReg)
+            2'b00: WD = ALUResult;
+            2'b10: WD = ReadData;
+            2'b01: WD = Result2;
+            2'b11: WD = Result1;
+        endcase
+
+    end 
     assign WriteData = RD2;
     assign WE = RegWrite;
     RegFile RegFile1( 
@@ -168,7 +185,9 @@ module RV #(
                     ALUSrcA,
                     ALUSrcB,
                     ImmSrc,
-                    ALUControl
+                    ALUControl,
+                    MCycleOp,
+                    Start
                 );
                 
     // Instantiate PC_Logic
@@ -203,6 +222,21 @@ module RV #(
                     ALUFlags
                 );                
     
+    // multiply and divide is DP Reg instruction, so no need to have multiplex for this
+    assign Operand1 = Src_A;
+    assign Operand2 = Src_B;
+    MCycle #(.width(32)) MCycle1(
+                CLK,
+                RESET,
+                Start,
+                MCycleOp,
+                Operand1,
+                Operand2,
+                Result1,
+                Result2,
+                Busy
+                );
+
     // Instantiate ProgramCounter
     always @(*) begin
         case(PCSrc)
@@ -213,12 +247,12 @@ module RV #(
             default: PC_IN = PC + 4;
         endcase
     end
-    assign WE_PC = 1; // right now no pipeline, just enable it
+    assign WE_PC = (Busy == 1'b1) ? 0 : 1; // Only change PC if the cpu is not stall by multicycle instruction
     ProgramCounter #(.PC_INIT(PC_INIT)) ProgramCounter1(
                     CLK,
                     RESET,
                     WE_PC,    
                     PC_IN,
                     PC  
-                );                         
+                );
 endmodule
